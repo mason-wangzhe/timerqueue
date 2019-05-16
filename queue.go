@@ -14,6 +14,25 @@ type Timer interface {
 	OnTimer(t time.Time)
 }
 
+//NewTimerWrapper util struct
+func NewTimerWrapper(fun TimerFunc) (result *TimerWrapper) {
+	result = &TimerWrapper{fun}
+	return
+}
+
+//TimerFunc timer function
+type TimerFunc func(t time.Time)
+
+//TimerWrapper just a time wrapper
+type TimerWrapper struct {
+	fun TimerFunc
+}
+
+//OnTimer ontimer
+func (t *TimerWrapper) OnTimer(tm time.Time) {
+	t.fun(tm)
+}
+
 // Queue is a time-sorted collection of Timer objects.
 type Queue struct {
 	heap  timerHeap
@@ -21,9 +40,10 @@ type Queue struct {
 }
 
 type timerData struct {
-	timer Timer
-	time  time.Time
-	index int
+	timer  Timer
+	time   time.Time
+	index  int
+	period time.Duration // if > 0, this will be a periodically event
 }
 
 // New creates a new timer priority queue.
@@ -41,8 +61,13 @@ func (q *Queue) Len() int {
 // Schedule schedules a timer for exectuion at time tm. If the
 // timer was already scheduled, it is rescheduled.
 func (q *Queue) Schedule(t Timer, tm time.Time) {
+	q.ScheduleRepeat(t, tm, 0)
+}
+
+// ScheduleRepeat give 0 duration, will not be repeatedly event
+func (q *Queue) ScheduleRepeat(t Timer, tm time.Time, period time.Duration) {
 	if data, ok := q.table[t]; !ok {
-		data = &timerData{t, tm, 0}
+		data = &timerData{t, tm, 0, period}
 		heap.Push(&q.heap, data)
 		q.table[t] = data
 	} else {
@@ -107,7 +132,12 @@ func (q *Queue) Advance(tm time.Time) {
 	for len(q.heap) > 0 && !tm.Before(q.heap[0].time) {
 		data := q.heap[0]
 		heap.Remove(&q.heap, data.index)
-		delete(q.table, data.timer)
+		if data.period > 0 {
+			data.time = data.time.Add(data.period)
+			heap.Push(&q.heap, data)
+		} else {
+			delete(q.table, data.timer)
+		}
 		data.timer.OnTimer(data.time)
 	}
 }
@@ -118,25 +148,30 @@ func (q *Queue) Advance(tm time.Time) {
 
 type timerHeap []*timerData
 
+//Len len interface
 func (h timerHeap) Len() int {
 	return len(h)
 }
 
+//Less less interface
 func (h timerHeap) Less(i, j int) bool {
 	return h[i].time.Before(h[j].time)
 }
 
+//Swap swap interface
 func (h timerHeap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 	h[i].index, h[j].index = i, j
 }
 
+//Push push interface
 func (h *timerHeap) Push(x interface{}) {
 	data := x.(*timerData)
 	*h = append(*h, data)
 	data.index = len(*h) - 1
 }
 
+//Pop pop interface
 func (h *timerHeap) Pop() interface{} {
 	n := len(*h)
 	data := (*h)[n-1]
